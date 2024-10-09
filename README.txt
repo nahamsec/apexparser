@@ -27,9 +27,7 @@ go mod init domain-processing-utility
 go mod tidy
 ```
 
-# Build Info
-
-To build the program, run:
+4. To build the program, run:
 
 ```
 go build -o apexfinder
