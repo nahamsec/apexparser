@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"flag"
 	"fmt"
 	"io"
 	"log"
@@ -12,22 +13,23 @@ import (
 	"github.com/globalsign/publicsuffix"
 )
 
-func extractTLD(input string) (string, error) {
+func extractTLD(input string) (string, string, error) {
 	input = strings.TrimSpace(input)
 	if input == "" {
-		return "", fmt.Errorf("invalid input: empty string")
+		return "", "", fmt.Errorf("invalid input: empty string")
 	}
 
-	result, err := publicsuffix.EffectiveTLDPlusOne(input)
+	rootDomain, err := publicsuffix.EffectiveTLDPlusOne(input)
 	if err != nil {
-		return "", fmt.Errorf("processing error: %w", err)
+		return "", "", fmt.Errorf("processing error: %w", err)
 	}
 
-	return result, nil
+	return rootDomain, input, nil
 }
 
-func processInputStream(r *bufio.Reader) ([]string, error) {
-	var tlds []string
+func processInputStream(r *bufio.Reader) (map[string][]string, error) {
+	domainMap := make(map[string][]string)
+
 	for {
 		line, err := r.ReadString('\n')
 		if err != nil {
@@ -37,44 +39,87 @@ func processInputStream(r *bufio.Reader) ([]string, error) {
 			return nil, fmt.Errorf("input read error: %w", err)
 		}
 
-		output, err := extractTLD(line)
+		rootDomain, fullDomain, err := extractTLD(line)
 		if err != nil {
 			log.Printf("Warning: %v", err)
 			continue
 		}
 
-		tlds = append(tlds, output)
+		// Append the full domain (subdomains and root domain) under the root domain
+		domainMap[rootDomain] = append(domainMap[rootDomain], fullDomain)
 	}
-	return tlds, nil
+	return domainMap, nil
 }
 
-func removeDuplicatesAndSort(tlds []string) []string {
-	uniqueTLDs := make(map[string]bool)
-	var result []string
+func removeDuplicatesAndSort(domainMap map[string][]string) map[string][]string {
+	for rootDomain, domains := range domainMap {
+		uniqueDomains := make(map[string]bool)
+		var uniqueList []string
 
-	for _, tld := range tlds {
-		lowerTLD := strings.ToLower(tld)
-		if !uniqueTLDs[lowerTLD] {
-			uniqueTLDs[lowerTLD] = true
-			result = append(result, tld)
+		// Remove duplicates
+		for _, domain := range domains {
+			if !uniqueDomains[domain] {
+				uniqueDomains[domain] = true
+				uniqueList = append(uniqueList, domain)
+			}
+		}
+
+		// Sort the domains
+		sort.Strings(uniqueList)
+		domainMap[rootDomain] = uniqueList
+	}
+
+	return domainMap
+}
+
+func writeToFiles(domainMap map[string][]string) error {
+	for rootDomain, domains := range domainMap {
+		// Create the filename based on the root domain
+		filename := fmt.Sprintf("%s.txt", rootDomain)
+
+		// Open or create the file
+		file, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			return fmt.Errorf("file open error: %w", err)
+		}
+		defer file.Close()
+
+		// Write all the domains (including subdomains) under the respective root domain
+		for _, domain := range domains {
+			if _, err := file.WriteString(domain + "\n"); err != nil {
+				return fmt.Errorf("file write error: %w", err)
+			}
 		}
 	}
 
-	sort.Strings(result) // Sort the results in lexicographical order
-	return result
+	return nil
 }
 
 func main() {
+	// Parse command-line flags
+	createFiles := flag.Bool("n", false, "create .txt files for each root domain and save domains")
+	flag.Parse()
+
 	inputReader := bufio.NewReader(os.Stdin)
 
-	tlds, err := processInputStream(inputReader)
+	// Process input stream
+	domainMap, err := processInputStream(inputReader)
 	if err != nil {
 		log.Fatalf("Fatal error: %v", err)
 	}
 
-	sortedUniqueTLDs := removeDuplicatesAndSort(tlds)
+	// Remove duplicates and sort the domains under each root domain
+	sortedDomainMap := removeDuplicatesAndSort(domainMap)
 
-	for _, tld := range sortedUniqueTLDs {
-		fmt.Println(tld)
+	// Print the sorted, unique list for each domain
+	for rootDomain, domains := range sortedDomainMap {
+		fmt.Printf("%s: %v\n", rootDomain, domains)
+	}
+
+	// If -n flag is provided, write the TLDs and subdomains to respective .txt files
+	if *createFiles {
+		if err := writeToFiles(sortedDomainMap); err != nil {
+			log.Fatalf("Error writing to files: %v", err)
+		}
 	}
 }
