@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/globalsign/publicsuffix"
@@ -25,14 +26,15 @@ func extractTLD(input string) (string, error) {
 	return result, nil
 }
 
-func processInputStream(r *bufio.Reader) error {
+func processInputStream(r *bufio.Reader) ([]string, error) {
+	var tlds []string
 	for {
 		line, err := r.ReadString('\n')
 		if err != nil {
 			if err == io.EOF {
-				return nil
+				break
 			}
-			return fmt.Errorf("input read error: %w", err)
+			return nil, fmt.Errorf("input read error: %w", err)
 		}
 
 		output, err := extractTLD(line)
@@ -41,14 +43,38 @@ func processInputStream(r *bufio.Reader) error {
 			continue
 		}
 
-		fmt.Println(output)
+		tlds = append(tlds, output)
 	}
+	return tlds, nil
+}
+
+func removeDuplicatesAndSort(tlds []string) []string {
+	uniqueTLDs := make(map[string]bool)
+	var result []string
+
+	for _, tld := range tlds {
+		lowerTLD := strings.ToLower(tld)
+		if !uniqueTLDs[lowerTLD] {
+			uniqueTLDs[lowerTLD] = true
+			result = append(result, tld)
+		}
+	}
+
+	sort.Strings(result) // Sort the results in lexicographical order
+	return result
 }
 
 func main() {
 	inputReader := bufio.NewReader(os.Stdin)
 
-	if err := processInputStream(inputReader); err != nil {
+	tlds, err := processInputStream(inputReader)
+	if err != nil {
 		log.Fatalf("Fatal error: %v", err)
+	}
+
+	sortedUniqueTLDs := removeDuplicatesAndSort(tlds)
+
+	for _, tld := range sortedUniqueTLDs {
+		fmt.Println(tld)
 	}
 }
